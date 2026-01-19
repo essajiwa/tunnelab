@@ -15,13 +15,13 @@
 //
 // Usage:
 //
-//   // Create an authentication message
-//   msg := NewControlMessage(MsgTypeAuth, uuid.New().String(), map[string]interface{}{
-//       "token": "your-token-here",
-//   })
+//	// Create an authentication message
+//	msg := NewControlMessage(MsgTypeAuth, uuid.New().String(), map[string]interface{}{
+//	    "token": "your-token-here",
+//	})
 //
-//   // Send over WebSocket
-//   conn.WriteJSON(msg)
+//	// Send over WebSocket
+//	conn.WriteJSON(msg)
 package protocol
 
 import (
@@ -33,18 +33,18 @@ type MessageType string
 
 const (
 	// MsgTypeAuth is the message type for client authentication.
-	MsgTypeAuth         MessageType = "auth"
+	MsgTypeAuth MessageType = "auth"
 	// MsgTypeAuthResponse is the message type for server authentication response.
 	MsgTypeAuthResponse MessageType = "auth_response"
 	// MsgTypeTunnelReq is the message type for tunnel creation request.
-	MsgTypeTunnelReq    MessageType = "tunnel_request"
+	MsgTypeTunnelReq MessageType = "tunnel_request"
 	// MsgTypeTunnelResp is the message type for tunnel creation response.
-	MsgTypeTunnelResp   MessageType = "tunnel_response"
+	MsgTypeTunnelResp MessageType = "tunnel_response"
 	// MsgTypeHeartbeat is the message type for keep-alive messages.
-	MsgTypeHeartbeat    MessageType = "heartbeat"
-	MsgTypeNewConn      MessageType = "new_connection"
-	MsgTypeCloseConn    MessageType = "close_connection"
-	MsgTypeError        MessageType = "error"
+	MsgTypeHeartbeat MessageType = "heartbeat"
+	MsgTypeNewConn   MessageType = "new_connection"
+	MsgTypeCloseConn MessageType = "close_connection"
+	MsgTypeError     MessageType = "error"
 )
 
 // ControlMessage represents a protocol message sent between server and client.
@@ -67,7 +67,7 @@ type TunnelResponse struct {
 	TunnelID   string `json:"tunnel_id"`  // Unique tunnel identifier
 	PublicURL  string `json:"public_url"` // Public URL for accessing the tunnel
 	PublicPort int    `json:"public_port,omitempty"`
-	Status     string `json:"status"`     // Tunnel status (active, error, etc.)
+	Status     string `json:"status"` // Tunnel status (active, error, etc.)
 	Message    string `json:"message,omitempty"`
 }
 
@@ -76,7 +76,7 @@ type AuthRequest struct {
 }
 
 type AuthResponse struct {
-	Success   bool   `json:"success"`   // Whether authentication succeeded
+	Success   bool   `json:"success"`             // Whether authentication succeeded
 	ClientID  string `json:"client_id,omitempty"` // Client identifier
 	Message   string `json:"message,omitempty"`   // Response message
 	ExpiresAt int64  `json:"expires_at,omitempty"`

@@ -5,22 +5,21 @@
 //
 // Example:
 //
-//   repo, err := NewRepository("tunnelab.db")
-//   if err != nil {
-//       log.Fatal(err)
-//   }
-//   defer repo.Close()
+//	repo, err := NewRepository("tunnelab.db")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer repo.Close()
 //
-//   client, err := repo.GetClientByToken("token")
-//   if err != nil {
-//       log.Fatal(err)
-//   }
+//	client, err := repo.GetClientByToken("token")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
 package database
 
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"

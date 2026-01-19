@@ -5,16 +5,16 @@
 //
 // Usage:
 //
-//   reg := NewRegistry()
-//   
-//   // Register a tunnel
-//   reg.Register(tunnelInfo)
-//   
-//   // Get tunnel by subdomain
-//   tunnel, exists := reg.GetBySubdomain("myapp")
-//   
-//   // Open a stream to the tunnel
-//   stream, err := reg.OpenStream("myapp")
+//	reg := NewRegistry()
+//
+//	// Register a tunnel
+//	reg.Register(tunnelInfo)
+//
+//	// Get tunnel by subdomain
+//	tunnel, exists := reg.GetBySubdomain("myapp")
+//
+//	// Open a stream to the tunnel
+//	stream, err := reg.OpenStream("myapp")
 package registry
 
 import (
@@ -28,22 +28,22 @@ import (
 
 // Registry manages active tunnels and their connections.
 type Registry struct {
-	mu      sync.RWMutex              // Mutex for thread-safe operations
+	mu      sync.RWMutex             // Mutex for thread-safe operations
 	tunnels map[string]*TunnelInfo   // Map of subdomain to tunnel info
 	clients map[string][]*TunnelInfo // Map of client ID to tunnel info
 }
 
 // TunnelInfo contains information about an active tunnel.
 type TunnelInfo struct {
-	ID         string         // Unique tunnel identifier
-	ClientID   string         // ID of the owning client
-	Subdomain  string         // Subdomain for public access
-	Protocol   string         // Protocol type (http, tcp, etc.)
-	LocalPort  int            // Local port to forward traffic to
-	PublicURL  string         // Public URL for the tunnel
-	PublicPort int            // Public port for the tunnel
+	ID          string          // Unique tunnel identifier
+	ClientID    string          // ID of the owning client
+	Subdomain   string          // Subdomain for public access
+	Protocol    string          // Protocol type (http, tcp, etc.)
+	LocalPort   int             // Local port to forward traffic to
+	PublicURL   string          // Public URL for the tunnel
+	PublicPort  int             // Public port for the tunnel
 	ControlConn *websocket.Conn // WebSocket connection
-	MuxSession  *yamux.Session // Yamux multiplexed session
+	MuxSession  *yamux.Session  // Yamux multiplexed session
 }
 
 // NewRegistry creates a new Registry instance.
@@ -88,7 +88,7 @@ func (r *Registry) Unregister(subdomain string) {
 
 	if tunnel, exists := r.tunnels[subdomain]; exists {
 		delete(r.tunnels, subdomain)
-		
+
 		// Remove from client list
 		clientTunnels := r.clients[tunnel.ClientID]
 		for i, t := range clientTunnels {

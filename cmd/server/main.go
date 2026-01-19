@@ -9,15 +9,17 @@
 //
 // Usage:
 //
-//   ./tunnelab-server -config configs/server.yaml
+//	./tunnelab-server -config configs/server.yaml
 //
 // Flags:
-//   -config: Path to configuration file (default: configs/server.yaml)
-//   -version: Show version information
+//
+//	-config: Path to configuration file (default: configs/server.yaml)
+//	-version: Show version information
 //
 // Configuration:
-//   The server is configured via YAML file. See configs/server.example.yaml
-//   for a complete example.
+//
+//	The server is configured via YAML file. See configs/server.example.yaml
+//	for a complete example.
 package main
 
 import (

@@ -210,10 +210,10 @@ func (h *Handler) waitForMuxConnection(tunnel *registry.TunnelInfo) {
 		protocol.MsgTypeNewConn,
 		uuid.New().String(),
 		map[string]interface{}{
-			"action":     "establish_mux",
-			"tunnel_id":  tunnel.ID,
-			"mux_port":   port,
-			"mux_addr":   fmt.Sprintf(":%d", port),
+			"action":    "establish_mux",
+			"tunnel_id": tunnel.ID,
+			"mux_port":  port,
+			"mux_addr":  fmt.Sprintf(":%d", port),
 		},
 	)
 
@@ -223,7 +223,7 @@ func (h *Handler) waitForMuxConnection(tunnel *registry.TunnelInfo) {
 	}
 
 	listener.(*net.TCPListener).SetDeadline(time.Now().Add(30 * time.Second))
-	
+
 	conn, err := listener.Accept()
 	if err != nil {
 		log.Printf("Failed to accept mux connection: %v", err)

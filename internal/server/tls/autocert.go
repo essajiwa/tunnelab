@@ -12,21 +12,21 @@
 //
 // Usage:
 //
-//   // Automatic certificate management
-//   certManager, err := NewCertManager(&Config{
-//       Domain:  "example.com",
-//       Email:   "admin@example.com",
-//       Staging: false,
-//   })
-//   if err != nil {
-//       log.Fatal(err)
-//   }
+//	// Automatic certificate management
+//	certManager, err := NewCertManager(&Config{
+//	    Domain:  "example.com",
+//	    Email:   "admin@example.com",
+//	    Staging: false,
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
 //
-//   // Use with HTTP server
-//   server := &http.Server{
-//       Addr:      ":443",
-//       TLSConfig: certManager.TLSConfig(),
-//   }
+//	// Use with HTTP server
+//	server := &http.Server{
+//	    Addr:      ":443",
+//	    TLSConfig: certManager.TLSConfig(),
+//	}
 package tls
 
 import (
@@ -94,10 +94,10 @@ func NewCertManager(cfg *Config) (*CertManager, error) {
 	}
 
 	manager := &autocert.Manager{
-		Prompt:      autocert.AcceptTOS,
-		HostPolicy:  hostPolicy,
-		Cache:       autocert.DirCache(cfg.CacheDir),
-		Email:       cfg.Email,
+		Prompt:     autocert.AcceptTOS,
+		HostPolicy: hostPolicy,
+		Cache:      autocert.DirCache(cfg.CacheDir),
+		Email:      cfg.Email,
 	}
 
 	if cfg.Staging {

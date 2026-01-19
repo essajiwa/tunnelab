@@ -49,10 +49,10 @@ type LoggingConfig struct {
 }
 
 type TunnelsConfig struct {
-	SubdomainFormat        string `yaml:"subdomain_format"`
-	TCPPortRange           string `yaml:"tcp_port_range"`
-	MaxTunnelsPerClient    int    `yaml:"max_tunnels_per_client"`
-	MaxConnectionsPerTunnel int   `yaml:"max_connections_per_tunnel"`
+	SubdomainFormat         string `yaml:"subdomain_format"`
+	TCPPortRange            string `yaml:"tcp_port_range"`
+	MaxTunnelsPerClient     int    `yaml:"max_tunnels_per_client"`
+	MaxConnectionsPerTunnel int    `yaml:"max_connections_per_tunnel"`
 }
 
 func Load(path string) (*Config, error) {

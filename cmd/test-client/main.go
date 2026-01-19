@@ -7,13 +7,14 @@
 //
 // Usage:
 //
-//   ./test-client -server ws://localhost:4443 -token TOKEN -subdomain test -port 8000
+//	./test-client -server ws://localhost:4443 -token TOKEN -subdomain test -port 8000
 //
 // Flags:
-//   -server: Control server WebSocket URL (default: ws://localhost:4443)
-//   -token: Authentication token (required)
-//   -subdomain: Subdomain for the tunnel (default: test)
-//   -port: Local port to forward traffic to (default: 8000)
+//
+//	-server: Control server WebSocket URL (default: ws://localhost:4443)
+//	-token: Authentication token (required)
+//	-subdomain: Subdomain for the tunnel (default: test)
+//	-port: Local port to forward traffic to (default: 8000)
 package main
 
 import (
@@ -32,61 +33,116 @@ import (
 
 // main is the entry point for the test client.
 func main() {
+	config := parseFlags()
+
+	if err := validateConfig(config); err != nil {
+		log.Fatal(err)
+	}
+
+	conn := connectToServer(config.ServerURL)
+	defer conn.Close()
+
+	if err := authenticate(conn, config.Token); err != nil {
+		log.Fatal(err)
+	}
+
+	tunnelInfo := createTunnel(conn, config.Subdomain, config.LocalPort)
+
+	muxSession := establishMuxSession(conn)
+	defer muxSession.Close()
+
+	log.Printf("\n🎉 Tunnel is ready! Access your local server at: %s\n", tunnelInfo.PublicURL)
+	log.Printf("Press Ctrl+C to stop\n")
+
+	go handleHeartbeat(conn)
+	runTunnelLoop(muxSession, config.LocalPort)
+}
+
+type Config struct {
+	ServerURL string
+	Token     string
+	Subdomain string
+	LocalPort int
+}
+
+func parseFlags() *Config {
 	serverURL := flag.String("server", "ws://localhost:4443", "Control server URL")
 	token := flag.String("token", "", "Authentication token")
 	subdomain := flag.String("subdomain", "test", "Subdomain to use")
 	localPort := flag.Int("port", 8000, "Local port to forward")
 	flag.Parse()
 
-	if *token == "" {
-		log.Fatal("Token is required. Use -token flag")
+	return &Config{
+		ServerURL: *serverURL,
+		Token:     *token,
+		Subdomain: *subdomain,
+		LocalPort: *localPort,
 	}
+}
 
-	log.Printf("Connecting to %s", *serverURL)
-	conn, _, err := websocket.DefaultDialer.Dial(*serverURL, nil)
+func validateConfig(config *Config) error {
+	if config.Token == "" {
+		return fmt.Errorf("token is required. Use -token flag")
+	}
+	return nil
+}
+
+func connectToServer(serverURL string) *websocket.Conn {
+	log.Printf("Connecting to %s", serverURL)
+	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer conn.Close()
+	return conn
+}
 
+func authenticate(conn *websocket.Conn, token string) error {
 	log.Println("Authenticating...")
 	authMsg := protocol.NewControlMessage(
 		protocol.MsgTypeAuth,
 		uuid.New().String(),
 		map[string]interface{}{
-			"token": *token,
+			"token": token,
 		},
 	)
 
 	if err := conn.WriteJSON(authMsg); err != nil {
-		log.Fatalf("Failed to send auth: %v", err)
+		return fmt.Errorf("failed to send auth: %v", err)
 	}
 
 	var authResp protocol.ControlMessage
 	if err := conn.ReadJSON(&authResp); err != nil {
-		log.Fatalf("Failed to read auth response: %v", err)
+		return fmt.Errorf("failed to read auth response: %v", err)
 	}
 
 	if authResp.Type != protocol.MsgTypeAuthResponse {
-		log.Fatalf("Unexpected response: %s", authResp.Type)
+		return fmt.Errorf("unexpected response: %s", authResp.Type)
 	}
 
 	success, _ := authResp.Payload["success"].(bool)
 	if !success {
 		msg, _ := authResp.Payload["message"].(string)
-		log.Fatalf("Auth failed: %s", msg)
+		return fmt.Errorf("auth failed: %s", msg)
 	}
 
 	log.Println("✓ Authenticated successfully")
+	return nil
+}
 
-	log.Printf("Requesting tunnel for subdomain: %s", *subdomain)
+type TunnelInfo struct {
+	PublicURL string
+	TunnelID  string
+}
+
+func createTunnel(conn *websocket.Conn, subdomain string, localPort int) *TunnelInfo {
+	log.Printf("Requesting tunnel for subdomain: %s", subdomain)
 	tunnelMsg := protocol.NewControlMessage(
 		protocol.MsgTypeTunnelReq,
 		uuid.New().String(),
 		map[string]interface{}{
-			"subdomain":  *subdomain,
+			"subdomain":  subdomain,
 			"protocol":   "http",
-			"local_port": *localPort,
+			"local_port": localPort,
 		},
 	)
 
@@ -110,8 +166,15 @@ func main() {
 	log.Printf("✓ Tunnel created!")
 	log.Printf("  Tunnel ID: %s", tunnelID)
 	log.Printf("  Public URL: %s", publicURL)
-	log.Printf("  Forwarding to: localhost:%d", *localPort)
+	log.Printf("  Forwarding to: localhost:%d", localPort)
 
+	return &TunnelInfo{
+		PublicURL: publicURL,
+		TunnelID:  tunnelID,
+	}
+}
+
+func establishMuxSession(conn *websocket.Conn) *yamux.Session {
 	var muxMsg protocol.ControlMessage
 	if err := conn.ReadJSON(&muxMsg); err != nil {
 		log.Fatalf("Failed to read mux message: %v", err)
@@ -128,20 +191,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to mux: %v", err)
 	}
-	defer muxConn.Close()
 
 	session, err := yamux.Client(muxConn, nil)
 	if err != nil {
 		log.Fatalf("Failed to create yamux session: %v", err)
 	}
-	defer session.Close()
 
 	log.Println("✓ Yamux session established")
-	log.Printf("\n🎉 Tunnel is ready! Access your local server at: %s\n", publicURL)
-	log.Printf("Press Ctrl+C to stop\n")
+	return session
+}
 
-	go handleHeartbeat(conn)
-
+func runTunnelLoop(session *yamux.Session, localPort int) {
 	for {
 		stream, err := session.AcceptStream()
 		if err != nil {
@@ -149,7 +209,7 @@ func main() {
 			continue
 		}
 
-		go handleStream(stream, *localPort)
+		go handleStream(stream, localPort)
 	}
 }
 

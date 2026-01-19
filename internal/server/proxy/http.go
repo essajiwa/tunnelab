@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -33,10 +34,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, exists := p.registry.GetBySubdomain(subdomain)
-	if !exists {
-		http.Error(w, "Tunnel not found", http.StatusNotFound)
-		log.Printf("Tunnel not found for subdomain: %s", subdomain)
+	if !p.handleTunnelLookup(w, subdomain) {
 		return
 	}
 
@@ -48,9 +46,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stream.Close()
 
-	if err := r.Write(stream); err != nil {
-		http.Error(w, "Failed to forward request", http.StatusBadGateway)
-		log.Printf("Failed to write request to stream: %v", err)
+	if !p.handleRequestForwarding(w, r, stream) {
 		return
 	}
 
@@ -62,6 +58,29 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	p.copyResponse(w, resp, subdomain, r, start)
+}
+
+func (p *HTTPProxy) handleTunnelLookup(w http.ResponseWriter, subdomain string) bool {
+	_, exists := p.registry.GetBySubdomain(subdomain)
+	if !exists {
+		http.Error(w, "Tunnel not found", http.StatusNotFound)
+		log.Printf("Tunnel not found for subdomain: %s", subdomain)
+		return false
+	}
+	return true
+}
+
+func (p *HTTPProxy) handleRequestForwarding(w http.ResponseWriter, r *http.Request, stream net.Conn) bool {
+	if err := r.Write(stream); err != nil {
+		http.Error(w, "Failed to forward request", http.StatusBadGateway)
+		log.Printf("Failed to write request to stream: %v", err)
+		return false
+	}
+	return true
+}
+
+func (p *HTTPProxy) copyResponse(w http.ResponseWriter, resp *http.Response, subdomain string, r *http.Request, start time.Time) {
 	for key, values := range resp.Header {
 		for _, value := range values {
 			w.Header().Add(key, value)
@@ -69,48 +88,49 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 
-	// Check if response supports flushing (for SSE and streaming)
 	flusher, canFlush := w.(http.Flusher)
-	
-	// For streaming responses (SSE, chunked, etc.), flush immediately
-	isStreaming := resp.Header.Get("Content-Type") == "text/event-stream" ||
-		resp.Header.Get("Transfer-Encoding") == "chunked" ||
-		resp.Header.Get("X-Accel-Buffering") == "no"
+	isStreaming := p.isStreamingResponse(resp)
 
 	var written int64
 	if isStreaming && canFlush {
-		// Stream with immediate flushing for SSE
-		buf := make([]byte, 32*1024) // 32KB buffer
-		for {
-			n, err := resp.Body.Read(buf)
-			if n > 0 {
-				nw, ew := w.Write(buf[:n])
-				written += int64(nw)
-				if ew != nil {
-					log.Printf("Error writing streaming response: %v", ew)
-					break
-				}
-				flusher.Flush() // Flush immediately for streaming
-			}
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("Error reading streaming response: %v", err)
-				}
-				break
-			}
-		}
+		written = p.copyStreamingResponse(w, resp.Body, flusher)
 	} else {
-		// Regular buffered copy for normal responses
-		var err error
-		written, err = io.Copy(w, resp.Body)
-		if err != nil {
-			log.Printf("Error copying response body: %v", err)
-		}
+		written, _ = io.Copy(w, resp.Body)
 	}
 
 	duration := time.Since(start)
 	log.Printf("[%s] %s %s -> %d (%d bytes, %v)",
 		subdomain, r.Method, r.URL.Path, resp.StatusCode, written, duration)
+}
+
+func (p *HTTPProxy) isStreamingResponse(resp *http.Response) bool {
+	return resp.Header.Get("Content-Type") == "text/event-stream" ||
+		resp.Header.Get("Transfer-Encoding") == "chunked" ||
+		resp.Header.Get("X-Accel-Buffering") == "no"
+}
+
+func (p *HTTPProxy) copyStreamingResponse(w http.ResponseWriter, body io.ReadCloser, flusher http.Flusher) int64 {
+	buf := make([]byte, 32*1024) // 32KB buffer
+	var written int64
+	for {
+		n, err := body.Read(buf)
+		if n > 0 {
+			nw, ew := w.Write(buf[:n])
+			written += int64(nw)
+			if ew != nil {
+				log.Printf("Error writing streaming response: %v", ew)
+				break
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading streaming response: %v", err)
+			}
+			break
+		}
+	}
+	return written
 }
 
 func (p *HTTPProxy) extractSubdomain(host string) string {
