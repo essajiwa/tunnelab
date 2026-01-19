@@ -1,0 +1,41 @@
+server:
+  domain: "tunnel.example.com"
+  control_port: 4443
+  http_port: 80
+  https_port: 443
+
+tls:
+  # Mode: "auto" (Let's Encrypt), "manual" (your own certs), or "disabled"
+  mode: "auto"
+  
+  # Email for Let's Encrypt notifications (required for auto mode)
+  email: "me@example.com"
+  
+  # Certificate cache directory (for auto mode)
+  cache_dir: "./certs"
+  
+  # Use Let's Encrypt staging environment for testing (set to false for production)
+  staging: false
+  
+  # Manual certificate paths (only for manual mode)
+  cert_path: ""
+  key_path: ""
+
+database:
+  type: "sqlite"
+  path: "./tunnelab.db"
+
+auth:
+  required: true
+  token_length: 32
+
+logging:
+  level: "info"
+  format: "text"
+  output: "stdout"
+
+tunnels:
+  subdomain_format: "{subdomain}.tunnel.example.com"
+  tcp_port_range: "10000-20000"
+  max_tunnels_per_client: 5
+  max_connections_per_tunnel: 100

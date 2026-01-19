@@ -1,0 +1,56 @@
+# Binaries
+tunnelab-server
+tunnelab-client
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Configuration files (keep examples)
+configs/server.yaml
+!configs/server.example.yaml
+
+# Logs
+*.log
+logs/
+
+# TLS certificates
+*.pem
+*.key
+*.crt
+certs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Backup files
+*.bak
+*.backup
