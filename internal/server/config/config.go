@@ -51,6 +51,7 @@ type LoggingConfig struct {
 type TunnelsConfig struct {
 	SubdomainFormat         string `yaml:"subdomain_format"`
 	TCPPortRange            string `yaml:"tcp_port_range"`
+	EnableGRPC              bool   `yaml:"enable_grpc"`
 	MaxTunnelsPerClient     int    `yaml:"max_tunnels_per_client"`
 	MaxConnectionsPerTunnel int    `yaml:"max_connections_per_tunnel"`
 }
@@ -97,6 +98,9 @@ func (c *Config) validate() error {
 	}
 	if c.Logging.Format == "" {
 		c.Logging.Format = "text"
+	}
+	if c.Tunnels.TCPPortRange == "" {
+		c.Tunnels.TCPPortRange = "30000-31000"
 	}
 	if c.Tunnels.MaxTunnelsPerClient == 0 {
 		c.Tunnels.MaxTunnelsPerClient = 5

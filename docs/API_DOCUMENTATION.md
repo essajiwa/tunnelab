@@ -26,8 +26,12 @@ clients that leverage TunneLab for tunneling services.
 
 - `auth`: Client authentication
 - `auth_response`: Server authentication response
-- `tunnel_request`: Request to create a tunnel
-- `tunnel_response`: Tunnel creation response
+- `tunnel_request`: Request to create an HTTP(S) tunnel
+- `tunnel_response`: Tunnel creation response for HTTP(S)
+- `tcp_request`: Request to create a TCP tunnel (raw port forwarding)
+- `tcp_response`: TCP tunnel creation response (returns public port)
+- `grpc_request`: Request to create a tunnel intended for gRPC (raw TCP)
+- `grpc_response`: gRPC tunnel creation response (returns public port/endpoint)
 - `new_connection`: New multiplexed connection notification
 - `heartbeat`: Keep-alive messages
 - `error`: Error messages
@@ -43,15 +47,26 @@ type ControlMessage struct {
 }
 
 type TunnelConfig struct {
-    Subdomain string `json:"subdomain"`  // Desired subdomain
-    Protocol  string `json:"protocol"`   // Protocol type
-    LocalPort int    `json:"local_port"` // Local port to forward
+    Subdomain string `json:"subdomain"`   // Desired subdomain
+    Protocol  string `json:"protocol"`    // Protocol type (http, tcp, grpc)
+    LocalPort int    `json:"local_port"`  // Local port to forward
+    LocalHost string `json:"local_host"` // Local host (defaults to localhost)
+}
+
+type GRPCTunnelConfig struct {
+    Subdomain  string   `json:"subdomain"`
+    LocalPort  int      `json:"local_port"`
+    LocalHost  string   `json:"local_host,omitempty"`
+    Services   []string `json:"services,omitempty"`
+    RequireTLS bool     `json:"require_tls"`
+    MaxStreams int      `json:"max_streams,omitempty"`
 }
 
 type TunnelResponse struct {
-    TunnelID  string `json:"tunnel_id"`  // Unique tunnel identifier
-    PublicURL string `json:"public_url"` // Public URL for access
-    Status    string `json:"status"`     // Tunnel status
+    TunnelID   string `json:"tunnel_id"`            // Unique tunnel identifier
+    PublicURL  string `json:"public_url,omitempty"` // Public URL for HTTP(S)
+    PublicPort int    `json:"public_port,omitempty"`// Assigned public port for TCP/gRPC
+    Status     string `json:"status"`               // Tunnel status
 }
 ```
 
@@ -218,18 +233,20 @@ type Registry struct {
     mu      sync.RWMutex              // Mutex for thread-safe operations
     tunnels map[string]*TunnelInfo   // Map of subdomain to tunnel info
     clients map[string][]*TunnelInfo // Map of client ID to tunnel info
+    ports   map[int]*TunnelInfo      // Map of public port to tunnel info (for TCP/gRPC)
 }
 
 type TunnelInfo struct {
-    ID         string         `json:"id"`         // Unique tunnel identifier
-    ClientID   string         `json:"client_id"`  // ID of the owning client
-    Subdomain  string         `json:"subdomain"`  // Subdomain for public access
-    Protocol   string         `json:"protocol"`   // Protocol type
-    LocalPort  int            `json:"local_port"` // Local port to forward
-    PublicURL  string         `json:"public_url"` // Public URL for the tunnel
-    PublicPort int            `json:"public_port"`// Public port for the tunnel
-    ControlConn *websocket.Conn `json:"-"`       // WebSocket connection
-    MuxSession  *yamux.Session `json:"-"`       // Yamux multiplexed session
+    ID         string          // Unique tunnel identifier
+    ClientID   string          // ID of the owning client
+    Subdomain  string          // Subdomain for public access
+    Protocol   string          // Protocol type (http, tcp, grpc)
+    LocalPort  int             // Local port to forward
+    LocalHost  string          // Local host address
+    PublicURL  string          // Public URL (HTTP/S tunnels)
+    PublicPort int             // Public port (TCP/gRPC tunnels)
+    ControlConn *websocket.Conn
+    MuxSession  *yamux.Session
 }
 ```
 
@@ -240,6 +257,7 @@ func NewRegistry() *Registry
 func (r *Registry) Register(tunnel *TunnelInfo) error
 func (r *Registry) Unregister(subdomain string)
 func (r *Registry) GetBySubdomain(subdomain string) (*TunnelInfo, bool)
+func (r *Registry) GetByPort(port int) (*TunnelInfo, bool)
 func (r *Registry) GetByClient(clientID string) []*TunnelInfo
 func (r *Registry) OpenStream(subdomain string) (net.Conn, error)
 func (r *Registry) Count() int

@@ -50,9 +50,11 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("TunneLab Server %s\n", version)
+		fmt.Printf("TunneLab Server Build Ver. %s\n", version)
 		os.Exit(0)
 	}
+
+	log.Printf("TunneLab Server Build Ver. %s started", version)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -68,6 +70,19 @@ func main() {
 	reg := registry.NewRegistry()
 
 	controlHandler := control.NewHandler(reg, repo, cfg.Server.Domain)
+	if err := controlHandler.ConfigurePortAllocator(cfg.Tunnels.TCPPortRange); err != nil {
+		log.Fatalf("Invalid TCP port range %q: %v", cfg.Tunnels.TCPPortRange, err)
+	}
+
+	var tcpProxy *proxy.TCPProxy
+	if cfg.Tunnels.TCPPortRange != "" {
+		tcpProxy = proxy.NewTCPProxy(reg)
+		if err := tcpProxy.StartTCPServer(cfg.Tunnels.TCPPortRange); err != nil {
+			log.Fatalf("Failed to start TCP proxy: %v", err)
+		}
+		log.Printf("TCP tunneling enabled on ports %s", cfg.Tunnels.TCPPortRange)
+	}
+
 	httpProxy := proxy.NewHTTPProxy(reg, cfg.Server.Domain)
 
 	controlMux := http.NewServeMux()
@@ -143,14 +158,6 @@ func main() {
 				log.Fatalf("HTTPS proxy failed: %v", err)
 			}
 		}()
-	}
-
-	log.Printf("TunneLab Server %s started", version)
-	log.Printf("Domain: %s", cfg.Server.Domain)
-	log.Printf("Control: :%d", cfg.Server.ControlPort)
-	log.Printf("HTTP: :%d", cfg.Server.HTTPPort)
-	if cfg.TLS.Mode != "disabled" {
-		log.Printf("HTTPS: :%d (%s)", cfg.Server.HTTPSPort, cfg.TLS.Mode)
 	}
 
 	sigChan := make(chan os.Signal, 1)

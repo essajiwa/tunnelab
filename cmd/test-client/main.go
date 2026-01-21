@@ -23,6 +23,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/essajiwa/tunnelab/pkg/protocol"
@@ -46,16 +47,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tunnelInfo := createTunnel(conn, config.Subdomain, config.LocalPort)
+	tunnelInfo := createTunnel(conn, config)
 
 	muxSession := establishMuxSession(conn)
 	defer muxSession.Close()
 
-	log.Printf("\n🎉 Tunnel is ready! Access your local server at: %s\n", tunnelInfo.PublicURL)
+	if tunnelInfo.PublicURL != "" {
+		log.Printf("\n🎉 Tunnel is ready! Access your local server at: %s\n", tunnelInfo.PublicURL)
+	} else {
+		log.Printf("\n🎉 Tunnel is ready! Public port: %d\n", tunnelInfo.PublicPort)
+	}
 	log.Printf("Press Ctrl+C to stop\n")
 
 	go handleHeartbeat(conn)
-	runTunnelLoop(muxSession, config.LocalPort)
+	runTunnelLoop(muxSession, config.LocalHost, config.LocalPort)
 }
 
 type Config struct {
@@ -63,6 +68,8 @@ type Config struct {
 	Token     string
 	Subdomain string
 	LocalPort int
+	LocalHost string
+	Protocol  string
 }
 
 func parseFlags() *Config {
@@ -70,6 +77,8 @@ func parseFlags() *Config {
 	token := flag.String("token", "", "Authentication token")
 	subdomain := flag.String("subdomain", "test", "Subdomain to use")
 	localPort := flag.Int("port", 8000, "Local port to forward")
+	localHost := flag.String("local-host", "localhost", "Local host to forward (default: localhost)")
+	protocol := flag.String("protocol", "http", "Protocol to tunnel (http|tcp|grpc)")
 	flag.Parse()
 
 	return &Config{
@@ -77,12 +86,19 @@ func parseFlags() *Config {
 		Token:     *token,
 		Subdomain: *subdomain,
 		LocalPort: *localPort,
+		LocalHost: *localHost,
+		Protocol:  strings.ToLower(*protocol),
 	}
 }
 
 func validateConfig(config *Config) error {
 	if config.Token == "" {
 		return fmt.Errorf("token is required. Use -token flag")
+	}
+	switch config.Protocol {
+	case "http", "tcp", "grpc":
+	default:
+		return fmt.Errorf("unsupported protocol %q (use http, tcp, or grpc)", config.Protocol)
 	}
 	return nil
 }
@@ -115,6 +131,13 @@ func authenticate(conn *websocket.Conn, token string) error {
 		return fmt.Errorf("failed to read auth response: %v", err)
 	}
 
+	if authResp.Type == protocol.MsgTypeError {
+		msg, _ := authResp.Payload["message"].(string)
+		if msg == "" {
+			msg = "authentication rejected"
+		}
+		return fmt.Errorf("auth failed: %s", msg)
+	}
 	if authResp.Type != protocol.MsgTypeAuthResponse {
 		return fmt.Errorf("unexpected response: %s", authResp.Type)
 	}
@@ -130,20 +153,32 @@ func authenticate(conn *websocket.Conn, token string) error {
 }
 
 type TunnelInfo struct {
-	PublicURL string
-	TunnelID  string
+	PublicURL  string
+	PublicPort int
+	TunnelID   string
+	Protocol   string
 }
 
-func createTunnel(conn *websocket.Conn, subdomain string, localPort int) *TunnelInfo {
-	log.Printf("Requesting tunnel for subdomain: %s", subdomain)
+func createTunnel(conn *websocket.Conn, cfg *Config) *TunnelInfo {
+	log.Printf("Requesting %s tunnel for subdomain: %s", strings.ToUpper(cfg.Protocol), cfg.Subdomain)
+	msgType := protocol.MsgTypeTunnelReq
+	switch cfg.Protocol {
+	case "tcp":
+		msgType = protocol.MsgTypeTCPReq
+	case "grpc":
+		msgType = protocol.MsgTypeGRPCReq
+	}
+	payload := map[string]interface{}{
+		"subdomain":  cfg.Subdomain,
+		"protocol":   cfg.Protocol,
+		"local_port": cfg.LocalPort,
+		"local_host": cfg.LocalHost,
+	}
+
 	tunnelMsg := protocol.NewControlMessage(
-		protocol.MsgTypeTunnelReq,
+		msgType,
 		uuid.New().String(),
-		map[string]interface{}{
-			"subdomain":  subdomain,
-			"protocol":   "http",
-			"local_port": localPort,
-		},
+		payload,
 	)
 
 	if err := conn.WriteJSON(tunnelMsg); err != nil {
@@ -160,17 +195,38 @@ func createTunnel(conn *websocket.Conn, subdomain string, localPort int) *Tunnel
 		log.Fatalf("Tunnel creation failed: %s", msg)
 	}
 
+	expectedType := protocol.MsgTypeTunnelResp
+	switch cfg.Protocol {
+	case "tcp":
+		expectedType = protocol.MsgTypeTCPResp
+	case "grpc":
+		expectedType = protocol.MsgTypeGRPCResp
+	}
+	if tunnelResp.Type != expectedType {
+		log.Fatalf("Unexpected response type: %s", tunnelResp.Type)
+	}
+
 	publicURL, _ := tunnelResp.Payload["public_url"].(string)
+	var publicPort int
+	if v, ok := tunnelResp.Payload["public_port"].(float64); ok {
+		publicPort = int(v)
+	}
 	tunnelID, _ := tunnelResp.Payload["tunnel_id"].(string)
 
 	log.Printf("✓ Tunnel created!")
 	log.Printf("  Tunnel ID: %s", tunnelID)
-	log.Printf("  Public URL: %s", publicURL)
-	log.Printf("  Forwarding to: localhost:%d", localPort)
+	if publicURL != "" {
+		log.Printf("  Public URL: %s", publicURL)
+	} else {
+		log.Printf("  Public Port: %d", publicPort)
+	}
+	log.Printf("  Forwarding to: %s:%d", cfg.LocalHost, cfg.LocalPort)
 
 	return &TunnelInfo{
-		PublicURL: publicURL,
-		TunnelID:  tunnelID,
+		PublicURL:  publicURL,
+		PublicPort: publicPort,
+		TunnelID:   tunnelID,
+		Protocol:   cfg.Protocol,
 	}
 }
 
@@ -201,7 +257,7 @@ func establishMuxSession(conn *websocket.Conn) *yamux.Session {
 	return session
 }
 
-func runTunnelLoop(session *yamux.Session, localPort int) {
+func runTunnelLoop(session *yamux.Session, localHost string, localPort int) {
 	for {
 		stream, err := session.AcceptStream()
 		if err != nil {
@@ -209,14 +265,14 @@ func runTunnelLoop(session *yamux.Session, localPort int) {
 			continue
 		}
 
-		go handleStream(stream, localPort)
+		go handleStream(stream, localHost, localPort)
 	}
 }
 
-func handleStream(stream net.Conn, localPort int) {
+func handleStream(stream net.Conn, localHost string, localPort int) {
 	defer stream.Close()
 
-	localConn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", localPort))
+	localConn, err := net.Dial("tcp", net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort)))
 	if err != nil {
 		log.Printf("Failed to connect to local server: %v", err)
 		return

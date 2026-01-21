@@ -1,5 +1,9 @@
 # TunneLab
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/essajiwa/tunnelab)](https://goreportcard.com/report/github.com/essajiwa/tunnelab)
+[![Go Reference](https://pkg.go.dev/badge/github.com/essajiwa/tunnelab.svg)](https://pkg.go.dev/github.com/essajiwa/tunnelab)
+[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
+
 A self-hosted tunneling server that exposes local servers to the public internet, similar to ngrok.
 
 ## Overview
@@ -24,7 +28,8 @@ A self-hosted tunneling server that exposes local servers to the public internet
 
 - ✅ **HTTP/HTTPS Tunneling** - Expose local web servers with custom subdomains
 - ✅ **Automatic HTTPS** - Let's Encrypt certificate generation and renewal
-- 🚧 **TCP Tunneling** - Expose any TCP service (planned)
+- ✅ **TCP Tunneling** - Expose any TCP service via assigned public ports
+- ⚙️ **gRPC over TCP** - Run gRPC services through raw TCP tunnels (client handles TLS)
 - ✅ **WebSocket Support** - Full WebSocket upgrade support
 - ✅ **TLS Termination** - Automatic HTTPS with Let's Encrypt or manual certificates
 - ✅ **Multi-client Support** - Handle multiple clients and tunnels simultaneously
@@ -196,7 +201,7 @@ TunneLab uses a WebSocket-based control channel and multiplexed data streams:
 2. **Data Channel**: Multiplexed TCP streams (using yamux) for actual traffic
 3. **Message Format**: JSON-encoded control messages
 
-See [PROTOCOL.md](docs/PROTOCOL.md) for detailed protocol specification.
+See [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md#pkgprotocol-package) for the full protocol specification.
 
 ## Development
 
@@ -312,7 +317,8 @@ Contributions are welcome! Please fork the repository and submit a pull request.
 - [x] WebSocket support
 - [x] Let's Encrypt integration (automatic HTTPS)
 - [x] Manual certificate support
-- [ ] TCP tunneling
+- [x] TCP tunneling
+- [ ] Enhanced gRPC controls (service allowlists, TLS enforcement)
 - [ ] UDP tunneling
 - [ ] Web dashboard
 - [ ] Custom domain support (BYOD)

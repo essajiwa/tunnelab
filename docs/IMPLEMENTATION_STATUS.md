@@ -64,6 +64,12 @@ The TunneLab server has been successfully implemented with all core functionalit
 - ✅ Graceful shutdown
 - ✅ Multiple server listeners (control + HTTP)
 
+#### 9. TLS/HTTPS Support
+- ✅ Automatic Let's Encrypt integration
+- ✅ Manual certificate loading
+- ✅ HTTP→HTTPS listener wiring
+- ✅ Configuration toggles for auto/manual/disabled modes
+
 ### Supporting Files
 
 #### Scripts
@@ -232,8 +238,7 @@ The server is ready for:
 ### Future Enhancements
 
 For large-scale production, consider adding:
-- [ ] HTTPS/TLS support with Let's Encrypt
-- [ ] TCP tunneling (port-based)
+- [ ] Enhanced gRPC controls (service allowlists, TLS enforcement)
 - [ ] UDP tunneling
 - [ ] Rate limiting per client
 - [ ] Bandwidth monitoring

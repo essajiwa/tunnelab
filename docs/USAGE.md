@@ -22,12 +22,15 @@ cp configs/server.example.yaml configs/server.yaml
 nano configs/server.yaml
 ```
 
-Update the domain:
+Update the domain and tunnel range:
 ```yaml
 server:
   domain: "example.com"  # Change to your domain
   control_port: 4443
   http_port: 80
+
+tunnels:
+  tcp_port_range: "30000-31000"  # Forward this range through your firewall/router
 ```
 
 ### 3. Start the Server
@@ -44,10 +47,12 @@ Expected output:
 ```
 Starting control server on :4443
 Starting HTTP proxy on :80
+TCP tunneling enabled on ports 30000-31000
 TunneLab Server dev started
 Domain: example.com
 Control: :4443
 HTTP: :80
+TCP: 30000-31000
 ```
 
 ## Client Token Management
@@ -86,10 +91,47 @@ With any client leveraging TunneLab:
 ./test-client -server ws://control.example.com:4443 \
   --token YOUR_TOKEN_HERE \
   --subdomain myapp \
-  --port 3000
+  --port 3000 \
+  --protocol http \
+  --local-host localhost
 ```
 
-This exposes `localhost:3000` to `http://myapp.example.com`
+Key flags:
+
+- `--protocol` – choose `http` (default), `tcp`, or `grpc`
+- `--local-host` – override the host the client connects to (useful for Docker or remote targets)
+
+Example TCP tunnel (raw port-forward):
+
+```bash
+./test-client -server ws://localhost:4443 \
+  --token YOUR_TOKEN \
+  --subdomain tcp-echo \
+  --port 9000 \
+  --local-host 127.0.0.1 \
+  --protocol tcp
+```
+
+The server responds with a `public_port` in the configured TCP port range. Point external clients to `yourdomain.com:PUBLIC_PORT`.
+
+Example gRPC tunnel (raw TCP forwarding for gRPC services):
+
+```bash
+./test-client -server ws://localhost:4443 \
+  --token YOUR_TOKEN \
+  --subdomain grpc-demo \
+  --port 50051 \
+  --protocol grpc
+```
+
+Because gRPC rides over HTTP/2, your gRPC clients simply target `yourdomain.com:PUBLIC_PORT` using TLS/plaintext consistent with your backend.
+
+#### TCP/gRPC smoke-test scripts
+
+Use the helper scripts under `examples/` for quick end-to-end checks once you know the assigned public port:
+
+- `examples/tcp-smoke-test.sh <host> <port> [message]` – pushes a payload over raw TCP using `nc` and prints the response
+- `examples/grpc-smoke-test.sh <host:port> <service/method> [jsonData]` – wraps `grpcurl` invocations (set `USE_TLS=1` to enable TLS verification)
 
 ### Multiple Tunnels
 
@@ -133,7 +175,7 @@ cd /tmp && echo "Hello from TunneLab!" > index.html && python3 -m http.server 30
 
 2. Start test client tunnel (in another terminal):
 ```bash
-./test-client -server ws://localhost:4443 -token YOUR_TOKEN -subdomain test -port 3000
+./test-client -server ws://localhost:4443 -token YOUR_TOKEN -subdomain test -port 3000 -protocol http
 ```
 
 3. Access from anywhere:
@@ -154,8 +196,8 @@ Server -> Client: Auth response (success/failure)
 ### 2. Tunnel Creation
 
 ```
-Client -> Server: Tunnel request (subdomain, protocol, local_port)
-Server -> Client: Tunnel response (tunnel_id, public_url)
+Client -> Server: Tunnel request (subdomain, protocol, local_host, local_port)
+Server -> Client: Tunnel response (HTTP: public_url, TCP/gRPC: public_port)
 Server -> Client: Mux establishment request
 Client -> Server: TCP connection for yamux session
 ```

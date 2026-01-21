@@ -2,6 +2,7 @@
 
 BINARY_NAME=tunnelab-server
 CONFIG_PATH=configs/server.yaml
+VERSION?=$(shell git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 help:
 	@echo "TunneLab Server - Makefile Commands"
@@ -16,7 +17,7 @@ help:
 
 build:
 	@echo "Building TunneLab server..."
-	@go build -ldflags="-s -w" -trimpath -o $(BINARY_NAME) ./cmd/server
+	@go build -ldflags="-s -w -X main.version=$(VERSION)" -trimpath -o $(BINARY_NAME) ./cmd/server
 	@echo "✓ Build complete: $(BINARY_NAME)"
 
 run: build
@@ -50,5 +51,5 @@ deps:
 
 install:
 	@echo "Installing TunneLab server..."
-	@go install ./cmd/server
+	@go install -ldflags="-s -w -X main.version=$(VERSION)" ./cmd/server
 	@echo "✓ Installed to $(shell go env GOPATH)/bin/server"

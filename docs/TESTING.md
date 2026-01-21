@@ -33,7 +33,8 @@ python3 -m http.server 8000
   -server ws://localhost:4443 \
   -token YOUR_TOKEN_HERE \
   -subdomain test \
-  -port 8000
+  -port 8000 \
+  -protocol http
 ```
 
 Expected output:
@@ -63,6 +64,28 @@ curl http://test.localhost
 # http://test.localhost
 ```
 
+## Testing TCP & gRPC Tunnels
+
+To test raw TCP forwarding (Redis, SSH, gRPC, etc.):
+
+```bash
+# Start a local TCP service, e.g., Redis on localhost:6379
+
+# Run the test client with tcp protocol
+./test-client \
+  -server ws://localhost:4443 \
+  -token YOUR_TOKEN_HERE \
+  -subdomain tcp-demo \
+  -port 6379 \
+  -local-host 127.0.0.1 \
+  -protocol tcp
+
+# Note the public_port in the output, then connect with
+redis-cli -h yourdomain.com -p PUBLIC_PORT
+```
+
+For gRPC (still raw TCP forwarding), use the same `-protocol grpc` flag and target the assigned public port from your gRPC client or the `examples/grpc-smoke-test.sh` helper.
+
 ## Automated Test Script
 
 Use the provided test script:
@@ -77,9 +100,16 @@ This script will:
 2. Generate/use a test token
 3. Build the test client
 4. Start a local HTTP server
-5. Create a tunnel
+5. Create an HTTP tunnel
 6. Test the connection
 7. Report success/failure
+
+For TCP/gRPC smoke tests, use:
+
+```bash
+./examples/tcp-smoke-test.sh yourdomain.com PUBLIC_PORT
+./examples/grpc-smoke-test.sh yourdomain.com:PUBLIC_PORT helloworld.Greeter/SayHello '{"name":"Tunnel"}'
+```
 
 ## Manual Testing with wscat
 
@@ -101,11 +131,17 @@ wscat -c ws://localhost:4443
 # Expected response
 {"type":"auth_response","request_id":"test-1","payload":{"success":true,"client_id":"..."},"timestamp":...}
 
-# Send tunnel request
+# Send HTTP tunnel request
 {"type":"tunnel_request","request_id":"test-2","payload":{"subdomain":"test","protocol":"http","local_port":8000},"timestamp":1234567890}
 
 # Expected response
 {"type":"tunnel_response","request_id":"test-2","payload":{"tunnel_id":"...","public_url":"http://test.localhost","status":"active"},"timestamp":...}
+
+# Send TCP tunnel request
+{"type":"tcp_request","request_id":"test-3","payload":{"subdomain":"tcp-demo","protocol":"tcp","local_port":6379},"timestamp":1234567890}
+
+# Expected response
+{"type":"tcp_response","request_id":"test-3","payload":{"tunnel_id":"...","public_port":30501,"status":"active"},"timestamp":...}
 ```
 
 ## Testing Different Scenarios
@@ -171,6 +207,31 @@ ls -lh downloaded.file
 ```
 
 ### Test 5: Connection Persistence
+
+### Test 6: TCP Service Forwarding (Redis example)
+
+```bash
+# Start Redis locally
+redis-server --port 6379
+
+# Start TCP tunnel
+./test-client -server ws://localhost:4443 -token TOKEN -subdomain redis -port 6379 -protocol tcp
+
+# Connect through public port
+redis-cli -h yourdomain.com -p PUBLIC_PORT
+```
+
+### Test 7: gRPC via raw TCP
+
+```bash
+# Start your gRPC server locally (listening on :50051)
+
+# Start tunnel
+./test-client -server ws://localhost:4443 -token TOKEN -subdomain grpc -port 50051 -protocol grpc
+
+# Invoke using grpcurl
+grpcurl -plaintext yourdomain.com:PUBLIC_PORT your.service/Method -d '{"name":"Tunnel"}'
+```
 
 ```bash
 # Start tunnel
@@ -317,15 +378,16 @@ Once basic testing works:
 
 ## Test Checklist
 
-- [ ] Server starts successfully
+- [ ] Server starts successfully (control, HTTP, TCP listeners up)
 - [ ] Health check responds
 - [ ] Client can authenticate
-- [ ] Tunnel can be created
+- [ ] HTTP tunnel can be created
+- [ ] TCP/gRPC tunnel can be created (public port assigned)
 - [ ] HTTP requests are forwarded
-- [ ] Multiple tunnels work
+- [ ] TCP traffic (e.g., Redis) flows through assigned port
+- [ ] Multiple tunnels work simultaneously
 - [ ] WebSocket upgrade works
 - [ ] Large files transfer correctly
-- [ ] Connections are reused
-- [ ] Client reconnects on disconnect
+- [ ] Connections are reused / client reconnects on drop
 - [ ] HTTPS works (if enabled)
 - [ ] External access works (if using real domain)

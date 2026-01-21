@@ -74,7 +74,7 @@ Client (Local - Any implementation using TunneLab protocol):
 
 ## 3. Open Source Solutions Analysis
 
-### 3.1 Recommended: frp (Fast Reverse Proxy)
+### 3.1 frp (Fast Reverse Proxy)
 - **License**: Apache 2.0 (Permissive)
 - **Language**: Go
 - **GitHub**: https://github.com/fatedier/frp
@@ -83,12 +83,11 @@ Client (Local - Any implementation using TunneLab protocol):
   - Supports HTTP, HTTPS, TCP, UDP
   - Built-in authentication
   - Plugin system
-  - Active maintenance
-  - Well-documented
+  - Actively maintained and documented
 - **Cons**:
-  - May need customization for specific branding
+  - Requires customization to align with TunneLab branding and roadmap
 
-### 3.2 Alternative: Chisel
+### 3.2 Chisel
 - **License**: MIT (Permissive)
 - **Language**: Go
 - **GitHub**: https://github.com/jpillora/chisel
@@ -97,25 +96,20 @@ Client (Local - Any implementation using TunneLab protocol):
   - SSH-based tunneling
   - Easy to deploy
 - **Cons**:
-  - Less feature-rich than frp
+  - Limited feature set compared to frp
   - Primarily TCP-focused
 
-### 3.3 Alternative: Rathole
+### 3.3 Rathole
 - **License**: Apache 2.0
 - **Language**: Rust
 - **Pros**:
   - High performance
   - Low resource usage
 - **Cons**:
-  - Not Go-based (requires separate deployment)
+  - Not Go-based, so integration would add operational complexity
 
-### 3.4 Build from Scratch Recommendation
-Given your requirements and the desire for complete control, I recommend **building a custom solution** using Go libraries while taking architectural inspiration from frp. This gives you:
-- Full control over features
-- Custom branding
-- Ability to add specific features
-- Learning opportunity
-- No dependency on external project roadmaps
+### 3.4 Build-from-Scratch Approach
+TunneLab adopts a custom Go implementation while drawing architectural inspiration from projects such as frp. This approach preserves full control over features, roadmap, and branding while allowing incorporation of only the components that align with project goals.
 
 ---
 
@@ -199,8 +193,12 @@ type MessageType string
 const (
     MsgTypeAuth         MessageType = "auth"
     MsgTypeAuthResponse MessageType = "auth_response"
-    MsgTypeTunnelReq    MessageType = "tunnel_request"
+    MsgTypeTunnelReq    MessageType = "tunnel_request"   // HTTP/HTTPS
     MsgTypeTunnelResp   MessageType = "tunnel_response"
+    MsgTypeTCPReq       MessageType = "tcp_request"      // Raw TCP
+    MsgTypeTCPResp      MessageType = "tcp_response"
+    MsgTypeGRPCReq      MessageType = "grpc_request"     // gRPC over TCP
+    MsgTypeGRPCResp     MessageType = "grpc_response"
     MsgTypeHeartbeat    MessageType = "heartbeat"
     MsgTypeNewConn      MessageType = "new_connection"
     MsgTypeCloseConn    MessageType = "close_connection"
@@ -219,16 +217,16 @@ type ControlMessage struct {
 1. Client connects to `wss://control.yourdomain.com`
 2. Client sends authentication message
 3. Server validates and responds
-4. Client requests tunnel (subdomain, protocol, local port)
-5. Server allocates tunnel and responds with public URL
+4. Client requests tunnel (subdomain, protocol, local host/port)
+5. Server allocates tunnel and responds with public URL (HTTP) or public port (TCP/gRPC)
 6. Heartbeat messages maintain connection
 7. Server notifies client of new incoming connections
 
 ### 5.2 Data Channel
 
-**Purpose**: Proxy actual traffic between public clients and local servers.
+**Purpose**: Proxy actual traffic between public clients and local servers/services.
 
-**Approach**: Multiplexed streams over single TCP connection
+**Approach**: Multiplexed streams over a single TCP connection (yamux). The same stream transport is used for HTTP, raw TCP, and gRPC; HTTP tunnels carry HTTP requests, while TCP/gRPC tunnels copy raw bytes.
 
 **Implementation**:
 ```go
@@ -279,10 +277,15 @@ type TCPProxy struct {
 }
 
 // Port allocation:
-// - Dynamically assign ports from pool (e.g., 10000-20000)
+// - Dynamically assign ports from configured range (e.g., 30000-31000)
 // - Map port to tunnel
 // - Forward raw TCP traffic through multiplexed stream
 ```
+
+**Notes**:
+- The proxy listens on every port in the configured range.
+- Incoming connections are matched to tunnels via `registry.GetByPort`.
+- Raw TCP forwarding can be used by any protocol (Redis, SSH, gRPC, etc.).
 
 ### 5.5 Tunnel Registry
 
@@ -291,25 +294,26 @@ type TCPProxy struct {
 **Data Model**:
 ```go
 type Tunnel struct {
-    ID          string    `json:"id"`
-    ClientID    string    `json:"client_id"`
-    Subdomain   string    `json:"subdomain"`
-    Protocol    string    `json:"protocol"` // http, https, tcp
-    LocalPort   int       `json:"local_port"`
-    PublicPort  int       `json:"public_port,omitempty"` // for TCP
-    PublicURL   string    `json:"public_url"`
-    CreatedAt   time.Time `json:"created_at"`
-    LastActive  time.Time `json:"last_active"`
-    Status      string    `json:"status"` // active, inactive
-    
-    // Connection reference
-    ControlConn *websocket.Conn `json:"-"`
-    MuxSession  *yamux.Session  `json:"-"`
+    ID         string
+    ClientID   string
+    Subdomain  string
+    Protocol   string        // http, https, tcp, grpc
+    LocalHost  string
+    LocalPort  int
+    PublicURL  string        // for HTTP/HTTPS
+    PublicPort int           // for TCP/gRPC
+    CreatedAt  time.Time
+    LastActive time.Time
+    Status     string
+
+    ControlConn *websocket.Conn
+    MuxSession  *yamux.Session
 }
 
 type TunnelRegistry struct {
     mu      sync.RWMutex
-    tunnels map[string]*Tunnel // key: subdomain or port
+    tunnels map[string]*Tunnel   // key: subdomain
+    ports   map[int]*Tunnel      // key: public port
     clients map[string][]*Tunnel // key: client_id
 }
 ```

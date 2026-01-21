@@ -31,19 +31,23 @@ type Registry struct {
 	mu      sync.RWMutex             // Mutex for thread-safe operations
 	tunnels map[string]*TunnelInfo   // Map of subdomain to tunnel info
 	clients map[string][]*TunnelInfo // Map of client ID to tunnel info
+	ports   map[int]*TunnelInfo      // Map of public port to tunnel info
 }
 
 // TunnelInfo contains information about an active tunnel.
 type TunnelInfo struct {
-	ID          string          // Unique tunnel identifier
-	ClientID    string          // ID of the owning client
-	Subdomain   string          // Subdomain for public access
-	Protocol    string          // Protocol type (http, tcp, etc.)
-	LocalPort   int             // Local port to forward traffic to
-	PublicURL   string          // Public URL for the tunnel
-	PublicPort  int             // Public port for the tunnel
-	ControlConn *websocket.Conn // WebSocket connection
-	MuxSession  *yamux.Session  // Yamux multiplexed session
+	ID           string          // Unique tunnel identifier
+	ClientID     string          // ID of the owning client
+	Subdomain    string          // Subdomain for public access
+	Protocol     string          // Protocol type (http, tcp, etc.)
+	LocalPort    int             // Local port to forward traffic to
+	LocalHost    string          // Local host for tunneling
+	PublicURL    string          // Public URL for the tunnel
+	PublicPort   int             // Public port for the tunnel
+	GRPCServices []string        // Allowed gRPC services
+	MaxStreams   int             // Max concurrent gRPC streams
+	ControlConn  *websocket.Conn // WebSocket connection
+	MuxSession   *yamux.Session  // Yamux multiplexed session
 }
 
 // NewRegistry creates a new Registry instance.
@@ -54,6 +58,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		tunnels: make(map[string]*TunnelInfo),
 		clients: make(map[string][]*TunnelInfo),
+		ports:   make(map[int]*TunnelInfo),
 	}
 }
 
@@ -71,6 +76,12 @@ func (r *Registry) Register(tunnel *TunnelInfo) error {
 	if _, exists := r.tunnels[tunnel.Subdomain]; exists {
 		return fmt.Errorf("subdomain %s is already in use", tunnel.Subdomain)
 	}
+	if tunnel.PublicPort > 0 {
+		if _, exists := r.ports[tunnel.PublicPort]; exists {
+			return fmt.Errorf("port %d is already in use", tunnel.PublicPort)
+		}
+		r.ports[tunnel.PublicPort] = tunnel
+	}
 
 	r.tunnels[tunnel.Subdomain] = tunnel
 	r.clients[tunnel.ClientID] = append(r.clients[tunnel.ClientID], tunnel)
@@ -84,12 +95,12 @@ func (r *Registry) Register(tunnel *TunnelInfo) error {
 //   - subdomain: The subdomain of the tunnel to remove
 func (r *Registry) Unregister(subdomain string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if tunnel, exists := r.tunnels[subdomain]; exists {
+	tunnel, exists := r.tunnels[subdomain]
+	if exists {
 		delete(r.tunnels, subdomain)
-
-		// Remove from client list
+		if tunnel.PublicPort > 0 {
+			delete(r.ports, tunnel.PublicPort)
+		}
 		clientTunnels := r.clients[tunnel.ClientID]
 		for i, t := range clientTunnels {
 			if t.Subdomain == subdomain {
@@ -98,7 +109,9 @@ func (r *Registry) Unregister(subdomain string) {
 			}
 		}
 	}
-	if tunnel, exists := r.tunnels[subdomain]; exists && tunnel.MuxSession != nil {
+	r.mu.Unlock()
+
+	if exists && tunnel.MuxSession != nil {
 		tunnel.MuxSession.Close()
 	}
 }
@@ -165,4 +178,13 @@ func (r *Registry) OpenStream(subdomain string) (net.Conn, error) {
 	}
 
 	return stream, nil
+}
+
+// GetByPort retrieves tunnel info by public port.
+func (r *Registry) GetByPort(port int) (*TunnelInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	tunnel, exists := r.ports[port]
+	return tunnel, exists
 }

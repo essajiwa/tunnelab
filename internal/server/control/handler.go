@@ -6,6 +6,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/essajiwa/tunnelab/internal/database"
@@ -22,10 +25,81 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+func ensureProtocolType(msg *protocol.ControlMessage, proto string) {
+	if msg.Payload == nil {
+		msg.Payload = make(map[string]interface{})
+	}
+	msg.Payload["protocol"] = proto
+}
+
+func (h *Handler) assignPublicPort(payload map[string]interface{}) (int, error) {
+	if value, ok := payload["public_port"].(float64); ok && value > 0 {
+		port := int(value)
+		if _, exists := h.registry.GetByPort(port); exists {
+			return 0, fmt.Errorf("port %d already in use", port)
+		}
+		return port, nil
+	}
+	if h.portAllocator == nil {
+		return 0, fmt.Errorf("tcp tunneling not enabled")
+	}
+	return h.portAllocator.allocate(h.registry)
+}
+
+type portAllocator struct {
+	start int
+	end   int
+	next  int
+	mu    sync.Mutex
+}
+
+func (a *portAllocator) allocate(reg *registry.Registry) (int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	rangeSize := a.end - a.start + 1
+	if rangeSize <= 0 {
+		return 0, fmt.Errorf("invalid port range")
+	}
+
+	for i := 0; i < rangeSize; i++ {
+		candidate := a.start + ((a.next - a.start + i + rangeSize) % rangeSize)
+		if _, exists := reg.GetByPort(candidate); !exists {
+			a.next = candidate + 1
+			if a.next > a.end {
+				a.next = a.start
+			}
+			return candidate, nil
+		}
+	}
+
+	return 0, fmt.Errorf("no available ports in range %d-%d", a.start, a.end)
+}
+
+func parsePortRange(r string) (int, int, error) {
+	parts := strings.Split(r, "-")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid port range: %s", r)
+	}
+	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid port range start: %w", err)
+	}
+	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid port range end: %w", err)
+	}
+	if start <= 0 || end <= 0 || end < start {
+		return 0, 0, fmt.Errorf("invalid port range values: %d-%d", start, end)
+	}
+	return start, end, nil
+}
+
 type Handler struct {
-	registry *registry.Registry
-	repo     *database.Repository
-	domain   string
+	registry      *registry.Registry
+	repo          *database.Repository
+	domain        string
+	portAllocator *portAllocator
 }
 
 func NewHandler(registry *registry.Registry, repo *database.Repository, domain string) *Handler {
@@ -34,6 +108,20 @@ func NewHandler(registry *registry.Registry, repo *database.Repository, domain s
 		repo:     repo,
 		domain:   domain,
 	}
+}
+
+// ConfigurePortAllocator enables automatic public-port assignment for TCP/gRPC tunnels.
+func (h *Handler) ConfigurePortAllocator(portRange string) error {
+	if portRange == "" {
+		h.portAllocator = nil
+		return nil
+	}
+	start, end, err := parsePortRange(portRange)
+	if err != nil {
+		return err
+	}
+	h.portAllocator = &portAllocator{start: start, end: end, next: start}
+	return nil
 }
 
 func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +204,12 @@ func (h *Handler) handleClient(conn *websocket.Conn, clientID string) {
 		switch msg.Type {
 		case protocol.MsgTypeTunnelReq:
 			h.handleTunnelRequest(conn, clientID, &msg)
+		case protocol.MsgTypeTCPReq:
+			ensureProtocolType(&msg, "tcp")
+			h.handleTunnelRequest(conn, clientID, &msg)
+		case protocol.MsgTypeGRPCReq:
+			ensureProtocolType(&msg, "grpc")
+			h.handleTunnelRequest(conn, clientID, &msg)
 		case protocol.MsgTypeHeartbeat:
 			h.handleHeartbeat(conn, &msg)
 		default:
@@ -127,7 +221,12 @@ func (h *Handler) handleClient(conn *websocket.Conn, clientID string) {
 func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg *protocol.ControlMessage) {
 	subdomain, _ := msg.Payload["subdomain"].(string)
 	protocolType, _ := msg.Payload["protocol"].(string)
+	protocolType = strings.ToLower(protocolType)
 	localPort, _ := msg.Payload["local_port"].(float64)
+	localHost, _ := msg.Payload["local_host"].(string)
+	if localHost == "" {
+		localHost = "localhost"
+	}
 
 	if subdomain == "" || protocolType == "" || localPort == 0 {
 		h.sendError(conn, msg.RequestID, "INVALID_REQUEST", "Missing required fields")
@@ -141,16 +240,29 @@ func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg
 	}
 
 	tunnelID := uuid.New().String()
-	publicURL := fmt.Sprintf("https://%s.%s", subdomain, h.domain)
+	var publicURL string
+	var publicPort int
+	switch protocolType {
+	case "http", "https":
+		publicURL = fmt.Sprintf("https://%s.%s", subdomain, h.domain)
+	default:
+		var err error
+		publicPort, err = h.assignPublicPort(msg.Payload)
+		if err != nil {
+			h.sendError(conn, msg.RequestID, "PORT_ALLOCATION_FAILED", err.Error())
+			return
+		}
+	}
 
 	tunnel := &database.Tunnel{
-		ID:        tunnelID,
-		ClientID:  clientID,
-		Subdomain: subdomain,
-		Protocol:  protocolType,
-		LocalPort: int(localPort),
-		PublicURL: publicURL,
-		Status:    "active",
+		ID:         tunnelID,
+		ClientID:   clientID,
+		Subdomain:  subdomain,
+		Protocol:   protocolType,
+		LocalPort:  int(localPort),
+		PublicURL:  publicURL,
+		PublicPort: publicPort,
+		Status:     "active",
 	}
 
 	if err := h.repo.CreateTunnel(tunnel); err != nil {
@@ -165,7 +277,9 @@ func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg
 		Subdomain:   subdomain,
 		Protocol:    protocolType,
 		LocalPort:   int(localPort),
+		LocalHost:   localHost,
 		PublicURL:   publicURL,
+		PublicPort:  publicPort,
 		ControlConn: conn,
 	}
 
@@ -177,14 +291,29 @@ func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg
 
 	go h.waitForMuxConnection(tunnelInfo)
 
+	respPayload := map[string]interface{}{
+		"tunnel_id": tunnelID,
+		"status":    "active",
+	}
+	if publicURL != "" {
+		respPayload["public_url"] = publicURL
+	}
+	if publicPort > 0 {
+		respPayload["public_port"] = publicPort
+	}
+
+	responseType := protocol.MsgTypeTunnelResp
+	switch protocolType {
+	case "tcp":
+		responseType = protocol.MsgTypeTCPResp
+	case "grpc":
+		responseType = protocol.MsgTypeGRPCResp
+	}
+
 	response := protocol.NewControlMessage(
-		protocol.MsgTypeTunnelResp,
+		responseType,
 		msg.RequestID,
-		map[string]interface{}{
-			"tunnel_id":  tunnelID,
-			"public_url": publicURL,
-			"status":     "active",
-		},
+		respPayload,
 	)
 
 	if err := conn.WriteJSON(response); err != nil {
@@ -193,7 +322,11 @@ func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg
 		h.repo.CloseTunnel(tunnelID)
 	}
 
-	log.Printf("Tunnel created: %s -> %s (client: %s)", publicURL, subdomain, clientID)
+	if publicPort > 0 {
+		log.Printf("Tunnel created: port %d -> %s (client: %s)", publicPort, subdomain, clientID)
+	} else {
+		log.Printf("Tunnel created: %s -> %s (client: %s)", publicURL, subdomain, clientID)
+	}
 }
 
 func (h *Handler) waitForMuxConnection(tunnel *registry.TunnelInfo) {

@@ -53,6 +53,9 @@ database:
   type: "sqlite"
   path: "./tunnelab.db"
 
+tunnels:
+  tcp_port_range: "30000-31000"  # Ensure your firewall/router forwards this range
+
 auth:
   required: true
 
@@ -88,16 +91,18 @@ Use this token with the test client or any client that leverages TunneLab:
 make run
 ```
 
-You should see:
+You should see logs similar to:
 
 ```
 Starting TunneLab server...
 Starting control server on :4443
 Starting HTTP proxy on :80
+TCP tunneling enabled on ports 30000-31000
 TunneLab Server dev started
 Domain: yourdomain.com
 Control: :4443
 HTTP: :80
+TCP: 30000-31000
 ```
 
 ## Step 6: Test the Server
@@ -114,7 +119,7 @@ curl http://localhost/health
 
 ## Step 7: Use with Test Client or Other Clients
 
-Now you can use the test client or any client that leverages TunneLab to create tunnels:
+Now you can use the test client or any client that leverages TunneLab to create tunnels. For HTTP:
 
 ```bash
 # Build the test client
@@ -124,10 +129,24 @@ go build -o test-client ./cmd/test-client
 ./test-client -server ws://control.yourdomain.com:4443 \
   -token a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6 \
   -subdomain myapp \
-  -port 3000
+  -port 3000 \
+  -protocol http
 ```
 
 This will expose your local server at `http://localhost:3000` to `http://myapp.yourdomain.com`.
+
+For a raw TCP (or gRPC) tunnel that assigns a public port:
+
+```bash
+./test-client -server ws://control.yourdomain.com:4443 \
+  -token a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6 \
+  -subdomain redis-demo \
+  -port 6379 \
+  -local-host 127.0.0.1 \
+  -protocol tcp
+```
+
+The command will print the `public_port` to share with external clients (ensure that port is forwarded to this server on your firewall/router).
 
 ## Verification
 
