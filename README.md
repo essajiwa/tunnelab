@@ -282,6 +282,33 @@ curl http://localhost/health
 - **TLS**: Automatic HTTPS with Let's Encrypt or manual certificates
 - **Database**: SQLite for tunnel persistence and client management
 
+## Development with Claude Code
+
+This project includes a Claude Code MCP configuration (`.mcp.json`) that connects Claude Code to Linear for AI-assisted issue tracking.
+
+### Setup
+
+1. **Install Claude Code** on your local machine:
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   ```
+
+2. **Set your Linear API key** as an environment variable:
+   ```bash
+   export LINEAR_API_KEY=lin_api_your_key_here
+   ```
+   Get your key from: Linear → Settings → API → Personal API Keys
+
+3. **Start Claude Code** in the project directory:
+   ```bash
+   cd tunnelab
+   claude
+   ```
+
+Claude Code will automatically load the Linear MCP server from `.mcp.json`, giving it the ability to create issues, query tasks, and update Linear directly from your terminal.
+
+> **Note:** The Linear MCP connection requires unrestricted internet access to `api.linear.app`. It will not work in sandboxed or network-restricted environments (e.g., cloud-based Claude Code sessions).
+
 ## Contributing
 
 1. Fork the repository
