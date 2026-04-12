@@ -53,6 +53,10 @@ const (
 	MsgTypeGRPCReq MessageType = "grpc_request"
 	// MsgTypeGRPCResp is the message type for gRPC tunnel creation response.
 	MsgTypeGRPCResp MessageType = "grpc_response"
+	// MsgTypeUDPReq is the message type for UDP tunnel creation request.
+	MsgTypeUDPReq MessageType = "udp_request"
+	// MsgTypeUDPResp is the message type for UDP tunnel creation response.
+	MsgTypeUDPResp MessageType = "udp_response"
 )
 
 // ControlMessage represents a protocol message sent between server and client.
@@ -61,59 +65,6 @@ type ControlMessage struct {
 	RequestID string                 `json:"request_id"` // Unique request identifier
 	Payload   map[string]interface{} `json:"payload"`    // Message payload data
 	Timestamp int64                  `json:"timestamp"`  // Unix timestamp
-}
-
-// TunnelConfig contains tunnel configuration parameters.
-type TunnelConfig struct {
-	Subdomain string `json:"subdomain"`  // Desired subdomain for the tunnel
-	Protocol  string `json:"protocol"`   // Protocol type (http, tcp, etc.)
-	LocalPort int    `json:"local_port"` // Local port to forward traffic to
-	LocalHost string `json:"local_host,omitempty"`
-}
-
-// GRPCTunnelConfig contains gRPC tunnel parameters.
-type GRPCTunnelConfig struct {
-	Subdomain   string   `json:"subdomain"`
-	LocalPort   int      `json:"local_port"`
-	LocalHost   string   `json:"local_host,omitempty"`
-	Services    []string `json:"services,omitempty"`
-	RequireTLS  bool     `json:"require_tls"`
-	MaxStreams  int      `json:"max_streams,omitempty"`
-	Compression string   `json:"compression,omitempty"`
-}
-
-type TunnelResponse struct {
-	TunnelID   string `json:"tunnel_id"`  // Unique tunnel identifier
-	PublicURL  string `json:"public_url"` // Public URL for accessing the tunnel
-	PublicPort int    `json:"public_port,omitempty"`
-	Status     string `json:"status"` // Tunnel status (active, error, etc.)
-	Message    string `json:"message,omitempty"`
-}
-
-// GRPCTunnelResponse extends TunnelResponse with gRPC metadata.
-type GRPCTunnelResponse struct {
-	TunnelID string   `json:"tunnel_id"`
-	Endpoint string   `json:"endpoint"`
-	Status   string   `json:"status"`
-	Message  string   `json:"message,omitempty"`
-	Services []string `json:"services,omitempty"`
-}
-
-type AuthRequest struct {
-	Token string `json:"token"` // Authentication token
-}
-
-type AuthResponse struct {
-	Success   bool   `json:"success"`             // Whether authentication succeeded
-	ClientID  string `json:"client_id,omitempty"` // Client identifier
-	Message   string `json:"message,omitempty"`   // Response message
-	ExpiresAt int64  `json:"expires_at,omitempty"`
-}
-
-type ErrorPayload struct {
-	Code    string                 `json:"code"`    // Error code
-	Message string                 `json:"message"` // Error message
-	Details map[string]interface{} `json:"details,omitempty"`
 }
 
 // NewControlMessage creates a new ControlMessage with the specified parameters.

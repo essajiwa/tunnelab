@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/essajiwa/tunnelab/internal/database"
+	"github.com/essajiwa/tunnelab/internal/server/proxy"
 	"github.com/essajiwa/tunnelab/internal/server/registry"
 	"github.com/essajiwa/tunnelab/pkg/protocol"
 	"github.com/google/uuid"
@@ -100,6 +101,7 @@ type Handler struct {
 	repo          *database.Repository
 	domain        string
 	portAllocator *portAllocator
+	udpProxy      *proxy.UDPProxy
 }
 
 func NewHandler(registry *registry.Registry, repo *database.Repository, domain string) *Handler {
@@ -108,6 +110,12 @@ func NewHandler(registry *registry.Registry, repo *database.Repository, domain s
 		repo:     repo,
 		domain:   domain,
 	}
+}
+
+// SetUDPProxy attaches a UDPProxy to the handler so it can start per-tunnel
+// UDP listeners when a UDP tunnel is registered.
+func (h *Handler) SetUDPProxy(p *proxy.UDPProxy) {
+	h.udpProxy = p
 }
 
 // ConfigurePortAllocator enables automatic public-port assignment for TCP/gRPC tunnels.
@@ -210,6 +218,9 @@ func (h *Handler) handleClient(conn *websocket.Conn, clientID string) {
 		case protocol.MsgTypeGRPCReq:
 			ensureProtocolType(&msg, "grpc")
 			h.handleTunnelRequest(conn, clientID, &msg)
+		case protocol.MsgTypeUDPReq:
+			ensureProtocolType(&msg, "udp")
+			h.handleTunnelRequest(conn, clientID, &msg)
 		case protocol.MsgTypeHeartbeat:
 			h.handleHeartbeat(conn, &msg)
 		default:
@@ -289,6 +300,16 @@ func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg
 		return
 	}
 
+	if protocolType == "udp" && h.udpProxy != nil && publicPort > 0 {
+		if err := h.udpProxy.ListenAndForward(publicPort, subdomain); err != nil {
+			log.Printf("Failed to start UDP listener on port %d: %v", publicPort, err)
+			h.registry.Unregister(subdomain)
+			h.repo.CloseTunnel(tunnelID)
+			h.sendError(conn, msg.RequestID, "UDP_BIND_FAILED", fmt.Sprintf("Failed to bind UDP port %d: %v", publicPort, err))
+			return
+		}
+	}
+
 	go h.waitForMuxConnection(tunnelInfo)
 
 	respPayload := map[string]interface{}{
@@ -308,6 +329,8 @@ func (h *Handler) handleTunnelRequest(conn *websocket.Conn, clientID string, msg
 		responseType = protocol.MsgTypeTCPResp
 	case "grpc":
 		responseType = protocol.MsgTypeGRPCResp
+	case "udp":
+		responseType = protocol.MsgTypeUDPResp
 	}
 
 	response := protocol.NewControlMessage(
@@ -346,7 +369,7 @@ func (h *Handler) waitForMuxConnection(tunnel *registry.TunnelInfo) {
 			"action":    "establish_mux",
 			"tunnel_id": tunnel.ID,
 			"mux_port":  port,
-			"mux_addr":  fmt.Sprintf(":%d", port),
+			"mux_addr":  fmt.Sprintf("%s:%d", h.domain, port),
 		},
 	)
 
@@ -400,6 +423,9 @@ func (h *Handler) sendError(conn *websocket.Conn, requestID, code, message strin
 func (h *Handler) cleanupClient(clientID string) {
 	tunnels := h.registry.GetByClient(clientID)
 	for _, tunnel := range tunnels {
+		if tunnel.Protocol == "udp" && h.udpProxy != nil {
+			h.udpProxy.StopForwarding(tunnel.Subdomain)
+		}
 		h.registry.Unregister(tunnel.Subdomain)
 		h.repo.CloseTunnel(tunnel.ID)
 		log.Printf("Cleaned up tunnel: %s", tunnel.Subdomain)

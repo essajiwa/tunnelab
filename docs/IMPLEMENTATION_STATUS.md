@@ -8,9 +8,7 @@ The TunneLab server has been successfully implemented with all core functionalit
 
 #### 1. Protocol Package (`pkg/protocol/`)
 - ✅ Control message types and structures
-- ✅ Tunnel configuration types
-- ✅ Authentication request/response types
-- ✅ Error handling structures
+- ✅ Length-prefixed framing helpers (UDP datagram framing)
 - ✅ Helper functions for message creation
 
 #### 2. Database Layer (`internal/database/`)
@@ -21,9 +19,10 @@ The TunneLab server has been successfully implemented with all core functionalit
 - ✅ Repository pattern for data access
 
 #### 3. Authentication (`internal/server/auth/`)
-- ✅ Token generation
+- ✅ Token generation (bcrypt-ready)
 - ✅ Token hashing with bcrypt
 - ✅ Token verification
+- ⚠️ Note: auth package exists but is not yet wired into the control handler. Auth currently uses plaintext token lookup in the database.
 
 #### 4. Tunnel Registry (`internal/server/registry/`)
 - ✅ In-memory tunnel tracking
@@ -42,13 +41,10 @@ The TunneLab server has been successfully implemented with all core functionalit
 - ✅ Client cleanup on disconnect
 - ✅ Error handling and messaging
 
-#### 6. HTTP Proxy (`internal/server/proxy/`)
-- ✅ Subdomain extraction from Host header
-- ✅ Tunnel lookup by subdomain
-- ✅ Stream-based request forwarding
-- ✅ HTTP request/response proxying
-- ✅ Health check endpoint
-- ✅ Request logging with metrics
+#### 6. Proxy Layer (`internal/server/proxy/`)
+- ✅ HTTP proxy: subdomain extraction, tunnel lookup, stream forwarding, health check
+- ✅ TCP proxy: port-based tunnel lookup, pre-bound port range, bidirectional forwarding
+- ✅ UDP proxy: length-prefixed datagram framing, per-tunnel on-demand listeners, lifecycle management (start/stop per tunnel)
 
 #### 7. Configuration (`internal/server/config/`)
 - ✅ YAML-based configuration
@@ -239,7 +235,7 @@ The server is ready for:
 
 For large-scale production, consider adding:
 - [ ] Enhanced gRPC controls (service allowlists, TLS enforcement)
-- [ ] UDP tunneling
+- [ ] Auth service integration (wire bcrypt token verification into control handler)
 - [ ] Rate limiting per client
 - [ ] Bandwidth monitoring
 - [ ] Web dashboard
@@ -253,16 +249,21 @@ For large-scale production, consider adding:
 ```
 tunnelab/
 ├── cmd/server/main.go                    # Server entry point
-├── pkg/protocol/messages.go              # Shared protocol (for clients)
+├── cmd/test-client/main.go               # Test client (http/tcp/grpc/udp)
+├── pkg/protocol/
+│   ├── messages.go                       # Shared protocol (for clients)
+│   └── framing.go                        # Length-prefixed datagram framing
 ├── internal/
 │   ├── database/
 │   │   ├── models.go                     # Data models
 │   │   └── repository.go                 # Database operations
 │   └── server/
-│       ├── auth/auth.go                  # Authentication
+│       ├── auth/auth.go                  # Authentication (bcrypt, not yet wired)
 │       ├── config/config.go              # Configuration
 │       ├── control/handler.go            # WebSocket control handler
 │       ├── proxy/http.go                 # HTTP reverse proxy
+│       ├── proxy/tcp.go                  # TCP tunnel proxy
+│       ├── proxy/udp.go                  # UDP tunnel proxy
 │       └── registry/registry.go          # Tunnel registry
 ├── configs/server.example.yaml           # Example config
 ├── scripts/
@@ -296,7 +297,7 @@ The server can:
 
 ----
 
-**Implementation Date**: January 2026  
-**Status**: Complete and tested  
+**Implementation Date**: April 2026  
+**Status**: Complete and tested (HTTP, TCP, gRPC, UDP tunneling)  
 **Build Status**: Successful  
 **Next**: Implement clients using the protocol documentation

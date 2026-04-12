@@ -18,6 +18,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -40,7 +41,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	conn := connectToServer(config.ServerURL)
+	conn := connectToServer(config.ServerURL, config.Insecure)
 	defer conn.Close()
 
 	if err := authenticate(conn, config.Token); err != nil {
@@ -60,7 +61,7 @@ func main() {
 	log.Printf("Press Ctrl+C to stop\n")
 
 	go handleHeartbeat(conn)
-	runTunnelLoop(muxSession, config.LocalHost, config.LocalPort)
+	runTunnelLoop(muxSession, config.LocalHost, config.LocalPort, config.Protocol)
 }
 
 type Config struct {
@@ -70,6 +71,7 @@ type Config struct {
 	LocalPort int
 	LocalHost string
 	Protocol  string
+	Insecure  bool
 }
 
 func parseFlags() *Config {
@@ -78,7 +80,8 @@ func parseFlags() *Config {
 	subdomain := flag.String("subdomain", "test", "Subdomain to use")
 	localPort := flag.Int("port", 8000, "Local port to forward")
 	localHost := flag.String("local-host", "localhost", "Local host to forward (default: localhost)")
-	protocol := flag.String("protocol", "http", "Protocol to tunnel (http|tcp|grpc)")
+	protocol := flag.String("protocol", "http", "Protocol to tunnel (http|tcp|grpc|udp)")
+	insecure := flag.Bool("insecure", false, "Skip TLS certificate verification (for staging/self-signed certs)")
 	flag.Parse()
 
 	return &Config{
@@ -88,6 +91,7 @@ func parseFlags() *Config {
 		LocalPort: *localPort,
 		LocalHost: *localHost,
 		Protocol:  strings.ToLower(*protocol),
+		Insecure:  *insecure,
 	}
 }
 
@@ -96,16 +100,22 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("token is required. Use -token flag")
 	}
 	switch config.Protocol {
-	case "http", "tcp", "grpc":
+	case "http", "tcp", "grpc", "udp":
 	default:
-		return fmt.Errorf("unsupported protocol %q (use http, tcp, or grpc)", config.Protocol)
+		return fmt.Errorf("unsupported protocol %q (use http, tcp, grpc, or udp)", config.Protocol)
 	}
 	return nil
 }
 
-func connectToServer(serverURL string) *websocket.Conn {
+func connectToServer(serverURL string, insecure bool) *websocket.Conn {
 	log.Printf("Connecting to %s", serverURL)
-	conn, _, err := websocket.DefaultDialer.Dial(serverURL, nil)
+	dialer := websocket.DefaultDialer
+	if insecure {
+		dialer = &websocket.Dialer{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		}
+	}
+	conn, _, err := dialer.Dial(serverURL, nil)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
@@ -167,6 +177,8 @@ func createTunnel(conn *websocket.Conn, cfg *Config) *TunnelInfo {
 		msgType = protocol.MsgTypeTCPReq
 	case "grpc":
 		msgType = protocol.MsgTypeGRPCReq
+	case "udp":
+		msgType = protocol.MsgTypeUDPReq
 	}
 	payload := map[string]interface{}{
 		"subdomain":  cfg.Subdomain,
@@ -201,6 +213,8 @@ func createTunnel(conn *websocket.Conn, cfg *Config) *TunnelInfo {
 		expectedType = protocol.MsgTypeTCPResp
 	case "grpc":
 		expectedType = protocol.MsgTypeGRPCResp
+	case "udp":
+		expectedType = protocol.MsgTypeUDPResp
 	}
 	if tunnelResp.Type != expectedType {
 		log.Fatalf("Unexpected response type: %s", tunnelResp.Type)
@@ -257,7 +271,7 @@ func establishMuxSession(conn *websocket.Conn) *yamux.Session {
 	return session
 }
 
-func runTunnelLoop(session *yamux.Session, localHost string, localPort int) {
+func runTunnelLoop(session *yamux.Session, localHost string, localPort int, proto string) {
 	for {
 		stream, err := session.AcceptStream()
 		if err != nil {
@@ -265,7 +279,47 @@ func runTunnelLoop(session *yamux.Session, localHost string, localPort int) {
 			continue
 		}
 
-		go handleStream(stream, localHost, localPort)
+		if proto == "udp" {
+			go handleUDPStream(stream, localHost, localPort)
+		} else {
+			go handleStream(stream, localHost, localPort)
+		}
+	}
+}
+
+func handleUDPStream(stream net.Conn, localHost string, localPort int) {
+	defer stream.Close()
+
+	pkt, err := protocol.ReadLengthPrefixed(stream)
+	if err != nil {
+		log.Printf("UDP stream: failed to read packet: %v", err)
+		return
+	}
+
+	addr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
+	localConn, err := net.Dial("udp", addr)
+	if err != nil {
+		log.Printf("UDP stream: failed to connect to local server: %v", err)
+		return
+	}
+	defer localConn.Close()
+
+	localConn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	if _, err := localConn.Write(pkt); err != nil {
+		log.Printf("UDP stream: failed to write to local server: %v", err)
+		return
+	}
+
+	buf := make([]byte, 65535)
+	n, err := localConn.Read(buf)
+	if err != nil {
+		log.Printf("UDP stream: failed to read from local server: %v", err)
+		return
+	}
+
+	if err := protocol.WriteLengthPrefixed(stream, buf[:n]); err != nil {
+		log.Printf("UDP stream: failed to write response: %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 # Binaries
 tunnelab-server
 tunnelab-client
+test-client
 *.exe
 *.dll
 *.so
@@ -38,6 +39,10 @@ certs/
 *.swo
 *~
 
+# AI tooling
+.claude/
+.serena/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -54,3 +59,17 @@ build/
 # Backup files
 *.bak
 *.backup
+
+# Terraform / OpenTofu
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+crash.log

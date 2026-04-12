@@ -83,6 +83,10 @@ func main() {
 		log.Printf("TCP tunneling enabled on ports %s", cfg.Tunnels.TCPPortRange)
 	}
 
+	udpProxy := proxy.NewUDPProxy(reg)
+	controlHandler.SetUDPProxy(udpProxy)
+	log.Printf("UDP tunneling enabled (ports allocated from %s)", cfg.Tunnels.TCPPortRange)
+
 	httpProxy := proxy.NewHTTPProxy(reg, cfg.Server.Domain)
 
 	controlMux := http.NewServeMux()
